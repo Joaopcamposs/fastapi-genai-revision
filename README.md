@@ -19,7 +19,8 @@ Servir como base de revisão prática para:
 - **Pydantic v2** para schemas/DTOs
 - **JWT** (`python-jose`) + **OAuth2 Password Flow** para autenticação
 - **bcrypt** para hash de senha
-- **LangGraph** + **Gemini** (`langchain-google-genai`) para o agente de IA
+- **LangChain** (`create_agent`) + **Gemini** (`langchain-google-genai`) para o agente de IA
+- **MCP** (`mcp[cli]`) para expor as mesmas ferramentas como servidor MCP
 - **uv** para gerenciamento de dependências
 - **ruff** para lint/format
 
@@ -42,11 +43,13 @@ infra/
 └── security.py    # hashing de senha e JWT (SecurityServices)
 
 agent/
-├── llm.py        # modelo (Gemini) e criação do agente ReAct (LangGraph)
-├── tools.py       # tools do agente (produtos e pedidos), escopadas ao usuário
-├── routes.py        # router FastAPI (/agent)
-├── schemas.py         # DTOs da rota do agente
-└── utils.py             # histórico de conversa por usuário (chat-history/*.json)
+├── llm.py        # modelo (Gemini) e criação do agente ReAct (LangChain)
+├── tools.py       # tools do agente LangChain (produtos e pedidos), escopadas ao usuário
+├── formatting.py    # formatação de produtos/pedidos em texto, compartilhada entre tools.py e mcp_server.py
+├── mcp_server.py      # servidor MCP standalone, expõe as mesmas consultas via protocolo MCP
+├── routes.py            # router FastAPI (/agent)
+├── schemas.py             # DTOs da rota do agente
+└── utils.py                 # histórico de conversa por usuário (chat-history/*.json)
 ```
 
 ### Agregados e consistência
@@ -104,6 +107,17 @@ Agente conversacional (LangGraph + Gemini) que responde perguntas sobre **produt
 
 Requer `GOOGLE_API_KEY` configurada no `.env` (veja `.env_example`) — sem ela a aplicação falha no startup (`ensure_configured()` em `agent/llm.py`, chamado no `lifespan`). As chamadas ao Gemini têm timeout de 30s e até 2 retries.
 
+### Servidor MCP (`agent/mcp_server.py`)
+
+Expõe `list_products` e `list_orders` como um servidor [MCP](https://modelcontextprotocol.io/) standalone (transporte stdio), para uso em clientes MCP como Claude Desktop — desacoplado do FastAPI/LangChain, e reaproveitando a mesma lógica de leitura (`ProductViewRepo`, `OrderViewRepo`) e formatação (`agent/formatting.py`) usada pelas tools do agente.
+
+```bash
+make mcp
+# ou: uv run python -m agent.mcp_server
+```
+
+Diferença importante em relação a `/agent`: não existe JWT/sessão HTTP no MCP — o cliente chama a tool diretamente. Por isso `list_orders` recebe o email do usuário como parâmetro explícito, em vez de vir de um `current_user` autenticado. Isso é aceitável para uso local/confiável (um dev plugando seu próprio banco no seu próprio cliente MCP), mas **não é multi-tenant-safe**: não exponha esse servidor em rede não confiável sem adicionar autenticação de verdade.
+
 ## Rodando o projeto
 
 ```bash
@@ -120,6 +134,7 @@ Docs interativos: `http://localhost:8000/docs`
 
 ```bash
 make run     # sobe o servidor em modo dev
+make mcp     # sobe o servidor MCP (stdio)
 make ruff    # lint + format com ruff
 ```
 
@@ -129,4 +144,4 @@ make ruff    # lint + format com ruff
 uv run pytest -x --tb=short -q
 ```
 
-Cobertura: auth, users, products, orders (incluindo escopo por usuário) e o agente (`agent/llm.py`, `agent/tools.py`, `agent/utils.py`, `agent/routes.py`, com o LLM real mockado — os testes não chamam a API do Gemini). Cada execução usa um `database.db` e um `chat-history/` isolados em `tests/` (via env vars `DATABASE_URL`/`CHAT_HISTORY_DIR`), nunca os dados reais do projeto.
+Cobertura: auth, users, products, orders (incluindo escopo por usuário), o agente (`agent/llm.py`, `agent/tools.py`, `agent/utils.py`, `agent/routes.py`, com o LLM real mockado — os testes não chamam a API do Gemini) e o servidor MCP (`agent/mcp_server.py`). Cada execução usa um `database.db` e um `chat-history/` isolados em `tests/` (via env vars `DATABASE_URL`/`CHAT_HISTORY_DIR`), nunca os dados reais do projeto.

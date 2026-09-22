@@ -2,6 +2,7 @@ from uuid import UUID
 
 from langchain_core.tools import tool
 
+from agent.formatting import format_orders, format_products
 from src.view_repo import OrderViewRepo, ProductViewRepo
 
 
@@ -12,24 +13,12 @@ def build_tools(user_id: UUID) -> list:
     async def list_products() -> str:
         """List available products, with name and price."""
         products = await ProductViewRepo().list()
-        if not products:
-            return "No products found."
-        return "\n".join(
-            f"{product.name}: ${product.price:.2f}" for product in products
-        )
+        return format_products(products)
 
     @tool
     async def list_orders() -> str:
         """List the authenticated user's orders, with items and total."""
         orders = await OrderViewRepo().list_by_user(user_id)
-        if not orders:
-            return "No orders found."
-        lines = []
-        for order in orders:
-            total = sum(item.unit_price * item.quantity for item in order.items)
-            lines.append(
-                f"Order {order.id}: {len(order.items)} item(s), total ${total:.2f}"
-            )
-        return "\n".join(lines)
+        return format_orders(orders)
 
     return [list_products, list_orders]
