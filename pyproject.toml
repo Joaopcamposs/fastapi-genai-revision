@@ -1,0 +1,14 @@
+[project]
+name = "fastapi-genai-revision"
+version = "0.1.0"
+requires-python = ">=3.13"
+dependencies = [
+    "aiosqlite>=0.22.1",
+    "bcrypt>=5.0.0",
+    "fastapi[standard]>=0.141.1",
+    "greenlet>=3.5.6",
+    "python-jose[cryptography]>=3.5.0",
+    "ruff>=0.16.8",
+    "sqlalchemy>=2.0.54",
+    "uuid7>=0.1.0",
+]
