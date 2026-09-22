@@ -1,18 +1,15 @@
-import os
 from datetime import UTC, datetime, timedelta
 
 import bcrypt
 from jose import JWTError, jwt
 
-SECRET_KEY = os.getenv("SECRET_KEY", "change-me")
-ALGORITHM = "HS256"
-ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "30"))
+from consts import ACCESS_TOKEN_EXPIRE_MINUTES, ALGORITHM, SECRET_KEY
 
 
 class SecurityServices:
     @staticmethod
     def verify_password(plain_password: str, hashed_password: str) -> bool:
-        """Verifica se a senha informada confere com o hash armazenado."""
+        """Check whether the given password matches the stored hash."""
         try:
             return bcrypt.checkpw(
                 plain_password.encode()[:72],
@@ -23,7 +20,7 @@ class SecurityServices:
 
     @staticmethod
     def encrypt_password(password: str) -> str:
-        """Criptografa a senha usando bcrypt."""
+        """Hash the password using bcrypt."""
         encrypted_password = bcrypt.hashpw(
             password.encode()[:72], bcrypt.gensalt()
         ).decode()

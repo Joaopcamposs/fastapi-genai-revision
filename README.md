@@ -19,6 +19,7 @@ Servir como base de revisão prática para:
 - **Pydantic v2** para schemas/DTOs
 - **JWT** (`python-jose`) + **OAuth2 Password Flow** para autenticação
 - **bcrypt** para hash de senha
+- **LangGraph** + **Gemini** (`langchain-google-genai`) para o agente de IA
 - **uv** para gerenciamento de dependências
 - **ruff** para lint/format
 
@@ -39,6 +40,13 @@ src/
 infra/
 ├── database.py    # engine, sessão, tipo GUID (UUID <-> CHAR(36) no sqlite)
 └── security.py    # hashing de senha e JWT (SecurityServices)
+
+agent/
+├── llm.py        # modelo (Gemini) e criação do agente ReAct (LangGraph)
+├── tools.py       # tools do agente (produtos e pedidos), escopadas ao usuário
+├── routes.py        # router FastAPI (/agent)
+├── schemas.py         # DTOs da rota do agente
+└── utils.py             # histórico de conversa por usuário (chat-history/*.json)
 ```
 
 ### Agregados e consistência
@@ -78,6 +86,24 @@ Todos os IDs são `UUID` (gerados com `uuid7`), armazenados como `CHAR(36)` no S
 
 > Produtos não são vinculados a usuário; pedidos sempre são vinculados ao usuário autenticado (via JWT).
 
+### Agente de IA (`/agent`)
+
+Agente conversacional (LangGraph + Gemini) que responde perguntas sobre **produtos** e **pedidos** usando os repositórios de leitura já existentes (`ProductViewRepo`, `OrderViewRepo`) como *tools*. Não acessa o banco diretamente nem inventa dados — só responde com base no que as tools retornam.
+
+- `POST /agent/ask` — envia uma pergunta (`{"question": "..."}`) e recebe a resposta completa do agente (autenticado)
+- `POST /agent/ask/stream` — mesma coisa, mas via SSE (`text/event-stream`), com o conteúdo chegando token a token conforme o modelo gera
+- `GET /agent/history` — histórico de perguntas/respostas do usuário autenticado
+- `DELETE /agent/history` — limpa o histórico do usuário autenticado
+
+**Como funciona:**
+
+- `agent/tools.py` — monta as tools por requisição, escopadas ao usuário autenticado (`build_tools(user_id)`). `list_products` lista produtos disponíveis; `list_orders` lista **apenas** os pedidos do usuário logado — o `user_id` vem do JWT, nunca é informado pela LLM, então não há como um usuário perguntar pelos pedidos de outro.
+- `agent/llm.py` — define o modelo (`gemini-3.5-flash` via `ChatGoogleGenerativeAI`) e `build_agent(tools)`, que cria um agente ReAct (`langchain.agents.create_agent`) com as tools da requisição.
+- `agent/utils.py` — persiste o histórico de conversa por usuário em `chat-history/{email}.json` (as últimas 50 interações; só as últimas 10 entram no contexto enviado à LLM).
+- `agent/routes.py` — router FastAPI que junta tudo: recupera histórico, monta o agente, invoca (ou faz stream via `agent.astream_events`), salva a resposta.
+
+Requer `GOOGLE_API_KEY` configurada no `.env` (veja `.env_example`) — sem ela a aplicação falha no startup (`ensure_configured()` em `agent/llm.py`, chamado no `lifespan`). As chamadas ao Gemini têm timeout de 30s e até 2 retries.
+
 ## Rodando o projeto
 
 ```bash
@@ -96,3 +122,11 @@ Docs interativos: `http://localhost:8000/docs`
 make run     # sobe o servidor em modo dev
 make ruff    # lint + format com ruff
 ```
+
+## Testes
+
+```bash
+uv run pytest -x --tb=short -q
+```
+
+Cobertura: auth, users, products, orders (incluindo escopo por usuário) e o agente (`agent/llm.py`, `agent/tools.py`, `agent/utils.py`, `agent/routes.py`, com o LLM real mockado — os testes não chamam a API do Gemini). Cada execução usa um `database.db` e um `chat-history/` isolados em `tests/` (via env vars `DATABASE_URL`/`CHAT_HISTORY_DIR`), nunca os dados reais do projeto.

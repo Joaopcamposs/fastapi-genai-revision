@@ -7,8 +7,22 @@ dependencies = [
     "bcrypt>=5.0.0",
     "fastapi[standard]>=0.141.1",
     "greenlet>=3.5.6",
+    "langchain>=1.4.2",
+    "langchain-core>=1.6.4",
+    "langchain-google-genai>=4.4.0",
+    "python-dotenv>=1.2.3",
     "python-jose[cryptography]>=3.5.0",
     "ruff>=0.16.8",
     "sqlalchemy>=2.0.54",
     "uuid7>=0.1.0",
 ]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+    "pytest-asyncio>=1.4.0",
+]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+pythonpath = ["."]

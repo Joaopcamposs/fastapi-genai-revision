@@ -1,4 +1,3 @@
-import os
 from collections.abc import AsyncGenerator
 from typing import Any
 from uuid import UUID
@@ -8,7 +7,7 @@ from sqlalchemy.engine import Dialect
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.orm import declarative_base
 
-DATABASE_URL = os.getenv("DATABASE_URL", "sqlite+aiosqlite:///database.db")
+from consts import DATABASE_URL
 
 Base = declarative_base()
 
