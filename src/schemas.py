@@ -30,6 +30,7 @@ class ProductPublic(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: UUID
+    user_id: UUID
     name: str
     price: float
 

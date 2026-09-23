@@ -24,9 +24,6 @@ class UserService:
     async def get_by_email(self, email: str) -> User | None:
         return await self.user_repo.get_by_email(email)
 
-    async def list(self, offset: int = 0, limit: int = 100) -> list[User]:
-        return await self.user_repo.list(offset=offset, limit=limit)
-
 
 class AuthService:
     def __init__(self, user_repo: UserRepository) -> None:
@@ -55,8 +52,8 @@ class ProductService:
     def __init__(self, product_repo: ProductRepository) -> None:
         self.product_repo = product_repo
 
-    async def create(self, name: str, price: float) -> Product:
-        product = ProductAggregate(name=name, price=price)
+    async def create(self, name: str, price: float, user_id: UUID) -> Product:
+        product = ProductAggregate(name=name, price=price, user_id=user_id)
         return await self.product_repo.add(product)
 
 

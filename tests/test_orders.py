@@ -48,6 +48,29 @@ async def test_create_order_unknown_product_fails(
     assert response.status_code == 400
 
 
+async def test_create_order_with_another_users_product(
+    client: AsyncClient, auth_headers: dict
+) -> None:
+    """Products are public: any user can order a product another user created."""
+    product_id = await _create_product(client, auth_headers, "Monitor", 900.0)
+
+    await client.post(
+        "/users/", json={"email": "other@example.com", "password": "secret123"}
+    )
+    other_login = await client.post(
+        "/auth/token",
+        data={"username": "other@example.com", "password": "secret123"},
+    )
+    other_headers = {"Authorization": f"Bearer {other_login.json()['access_token']}"}
+
+    response = await client.post(
+        "/orders/",
+        json={"items": [{"product_id": product_id, "quantity": 1}]},
+        headers=other_headers,
+    )
+    assert response.status_code == 201
+
+
 async def test_list_orders_scoped_to_current_user(
     client: AsyncClient, auth_headers: dict
 ) -> None:

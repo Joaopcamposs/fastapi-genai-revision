@@ -20,6 +20,7 @@ class Product(Base):
     __tablename__ = "products"
 
     id: Mapped[UUID] = mapped_column(GUID, primary_key=True, default=uuid7)
+    user_id: Mapped[UUID] = mapped_column(GUID, ForeignKey("users.id"), nullable=False)
     name: Mapped[str] = mapped_column(Text, index=True, nullable=False)
     price: Mapped[float] = mapped_column(Numeric(10, 2), nullable=False)
 

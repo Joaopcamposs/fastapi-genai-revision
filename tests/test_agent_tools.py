@@ -9,8 +9,10 @@ async def test_list_products_tool(client: AsyncClient, auth_headers: dict) -> No
     await client.post(
         "/products/", json={"name": "Keyboard", "price": 250.0}, headers=auth_headers
     )
+    me = await client.get("/users/user@example.com", headers=auth_headers)
+    user_id = UUID(me.json()["id"])
 
-    list_products, _ = build_tools(UUID(int=0))
+    list_products, _ = build_tools(user_id)
     result = await list_products.ainvoke({})
     assert "Keyboard" in result
     assert "250.00" in result

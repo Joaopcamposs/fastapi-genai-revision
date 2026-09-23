@@ -1,9 +1,10 @@
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 
+from infra.rate_limit import limiter
 from infra.security import SecurityServices
 from src.domain_repo import OrderRepository, ProductRepository, UserRepository
 from src.orm_models import User
@@ -77,13 +78,9 @@ async def create_user(payload: UserCreate) -> User:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(error))
 
 
-@user_router.get("/", response_model=list[UserPublic])
-async def list_users(
-    current_user: CurrentUser,
-    offset: int = 0,
-    limit: Annotated[int, Query(le=100)] = 100,
-) -> list[User]:
-    return await UserService(UserRepository()).list(offset=offset, limit=limit)
+@user_router.get("/me", response_model=UserPublic)
+async def get_me(current_user: CurrentUser) -> User:
+    return current_user
 
 
 @user_router.get("/{email}", response_model=UserPublic)
@@ -105,7 +102,7 @@ async def create_product(
 ) -> ProductPublic:
     try:
         product = await ProductService(ProductRepository()).create(
-            payload.name, payload.price
+            payload.name, payload.price, current_user.id
         )
     except ValueError as error:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(error))
@@ -113,11 +110,13 @@ async def create_product(
 
 
 @product_router.get("/", response_model=list[ProductPublic])
+@limiter.limit("30/minute")
 async def list_products(
-    current_user: CurrentUser,
+    request: Request,
     offset: int = 0,
     limit: Annotated[int, Query(le=100)] = 100,
 ) -> list[ProductPublic]:
+    """Products are public, no auth required — rate-limited per IP to avoid abuse."""
     products = await ProductViewRepo().list(offset=offset, limit=limit)
     return [ProductPublic.model_validate(product) for product in products]
 

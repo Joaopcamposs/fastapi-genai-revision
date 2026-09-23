@@ -4,10 +4,11 @@ from uuid import UUID
 
 @dataclass
 class Product:
-    """Aggregate root: a sellable product. Owns its own pricing invariants."""
+    """Aggregate root: a sellable product, owned by the tenant (user) that created it."""
 
     name: str
     price: float
+    user_id: UUID
     id: UUID | None = None
 
     def __post_init__(self) -> None:

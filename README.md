@@ -11,6 +11,7 @@ Servir como base de revisão prática para:
 - Design de API REST
 - Conceitos de DDD aplicados de forma simples: agregados, invariantes de domínio, separação entre modelo de domínio e modelo de persistência
 - Separação de responsabilidades entre leitura e escrita (CQRS-lite)
+- Multi-tenancy simples: cada usuário é seu próprio tenant
 
 ## Stack
 
@@ -21,6 +22,7 @@ Servir como base de revisão prática para:
 - **bcrypt** para hash de senha
 - **LangChain** (`create_agent`) + **Gemini** (`langchain-google-genai`) para o agente de IA
 - **MCP** (`mcp[cli]`) para expor as mesmas ferramentas como servidor MCP
+- **slowapi** para rate limiting (endpoints públicos, sem auth)
 - **uv** para gerenciamento de dependências
 - **ruff** para lint/format
 
@@ -64,6 +66,15 @@ Repositórios de domínio (`domain_repo.py`) lidam com escrita e usam uma sessã
 
 Todos os IDs são `UUID` (gerados com `uuid7`), armazenados como `CHAR(36)` no SQLite via o tipo customizado `GUID` (`infra/database.py`), que converte automaticamente `UUID <-> str` na fronteira com o banco.
 
+### Multi-tenancy
+
+Cada usuário é o dono do seu próprio tenant — o `id` do usuário autenticado (via JWT) é o `tenant_id` usado para isolar dados entre contas. Não existe uma tabela `tenants` separada; o tenant **é** o `User`.
+
+- `Order` é escopado por `user_id`: cada usuário só lista/vê seus próprios pedidos.
+- Não existe listagem de usuários (vazaria outros tenants). `GET /users/me` retorna só o próprio usuário autenticado; `GET /users/{email}` também é restrito ao próprio usuário.
+- `Product` é a exceção: **é público**, visível a qualquer usuário autenticado, e qualquer usuário pode incluir qualquer produto num pedido. `Product.user_id` só registra quem criou o produto — não é usado para filtrar leitura nem escrita.
+- O agente de IA (`agent/tools.py`) e o servidor MCP (`agent/mcp_server.py`) seguem a mesma regra: `list_products` é global; `list_orders` é escopado ao tenant do usuário autenticado (agente) ou do email informado (MCP).
+
 ## Funcionalidades
 
 ### Autenticação (`/auth`)
@@ -73,21 +84,21 @@ Todos os IDs são `UUID` (gerados com `uuid7`), armazenados como `CHAR(36)` no S
 ### Usuários (`/users`)
 
 - `POST /users/` — cria usuário (email único, senha com hash bcrypt)
-- `GET /users/` — lista usuários (autenticado)
+- `GET /users/me` — retorna o próprio usuário autenticado (a partir do JWT)
 - `GET /users/{email}` — busca usuário por email (autenticado, só o próprio usuário)
 
 ### Produtos (`/products`)
 
-- `POST /products/` — cria produto (autenticado)
-- `GET /products/` — lista produtos (autenticado)
+- `POST /products/` — cria produto (autenticado); registra `user_id` de quem criou, mas o produto é público
+- `GET /products/` — lista **todos** os produtos, de qualquer usuário; **não exige autenticação**, limitado a 30 req/min por IP (`slowapi`)
 
 ### Pedidos (`/orders`)
 
-- `POST /orders/` — cria pedido com um ou mais itens, vinculado ao usuário autenticado
+- `POST /orders/` — cria pedido com um ou mais itens, vinculado ao usuário autenticado; os produtos referenciados podem ser de qualquer usuário (produtos são públicos)
 - `GET /orders/` — lista pedidos do usuário autenticado
 - `GET /orders/{order_id}` — busca um pedido específico do usuário autenticado
 
-> Produtos não são vinculados a usuário; pedidos sempre são vinculados ao usuário autenticado (via JWT).
+> Pedidos e usuários são escopados ao tenant (usuário) autenticado via JWT; produtos são públicos — ver [Multi-tenancy](#multi-tenancy).
 
 ### Agente de IA (`/agent`)
 
@@ -100,7 +111,7 @@ Agente conversacional (LangGraph + Gemini) que responde perguntas sobre **produt
 
 **Como funciona:**
 
-- `agent/tools.py` — monta as tools por requisição, escopadas ao usuário autenticado (`build_tools(user_id)`). `list_products` lista produtos disponíveis; `list_orders` lista **apenas** os pedidos do usuário logado — o `user_id` vem do JWT, nunca é informado pela LLM, então não há como um usuário perguntar pelos pedidos de outro.
+- `agent/tools.py` — monta as tools por requisição (`build_tools(user_id)`). `list_products` lista produtos disponíveis (públicos); `list_orders` lista **apenas** os pedidos do usuário logado — o `user_id` vem do JWT, nunca é informado pela LLM, então não há como um usuário perguntar pelos pedidos de outro.
 - `agent/llm.py` — define o modelo (`gemini-3.5-flash` via `ChatGoogleGenerativeAI`) e `build_agent(tools)`, que cria um agente ReAct (`langchain.agents.create_agent`) com as tools da requisição.
 - `agent/utils.py` — persiste o histórico de conversa por usuário em `chat-history/{email}.json` (as últimas 50 interações; só as últimas 10 entram no contexto enviado à LLM).
 - `agent/routes.py` — router FastAPI que junta tudo: recupera histórico, monta o agente, invoca (ou faz stream via `agent.astream_events`), salva a resposta.
@@ -111,12 +122,32 @@ Requer `GOOGLE_API_KEY` configurada no `.env` (veja `.env_example`) — sem ela 
 
 Expõe `list_products` e `list_orders` como um servidor [MCP](https://modelcontextprotocol.io/) standalone (transporte stdio), para uso em clientes MCP como Claude Desktop — desacoplado do FastAPI/LangChain, e reaproveitando a mesma lógica de leitura (`ProductViewRepo`, `OrderViewRepo`) e formatação (`agent/formatting.py`) usada pelas tools do agente.
 
+Rodar direto via stdio (para um cliente MCP real, como Claude Desktop):
+
 ```bash
-make mcp
-# ou: uv run python -m agent.mcp_server
+uv run python -m agent.mcp_server
 ```
 
-Diferença importante em relação a `/agent`: não existe JWT/sessão HTTP no MCP — o cliente chama a tool diretamente. Por isso `list_orders` recebe o email do usuário como parâmetro explícito, em vez de vir de um `current_user` autenticado. Isso é aceitável para uso local/confiável (um dev plugando seu próprio banco no seu próprio cliente MCP), mas **não é multi-tenant-safe**: não exponha esse servidor em rede não confiável sem adicionar autenticação de verdade.
+Diferença importante em relação a `/agent`: não existe JWT/sessão HTTP no MCP — o cliente chama a tool diretamente. `list_products` não precisa de usuário (produtos são públicos); `list_orders` recebe o email do usuário como parâmetro explícito, em vez de vir de um `current_user` autenticado. Isso é aceitável para uso local/confiável (um dev plugando seu próprio banco no seu próprio cliente MCP), mas **não é multi-tenant-safe por si só**: não exponha esse servidor em rede não confiável sem adicionar autenticação de verdade.
+
+#### Testando com o MCP Inspector
+
+O pacote `mcp[cli]` traz um inspector web interativo pra chamar as tools na mão, sem precisar de um cliente MCP completo.
+
+1. Suba o Inspector (precisa de `node`/`npx` instalados):
+   ```bash
+   make mcp
+   # ou: uv run mcp dev agent/mcp_server.py:mcp
+   ```
+   > `mcp dev`/`mcp run` carregam `agent/mcp_server.py` direto via `importlib`, sem adicionar a raiz do projeto no `sys.path` — por isso o próprio arquivo faz `sys.path.insert(0, ...)` no topo, senão `from agent.formatting import ...` falharia com `ModuleNotFoundError: No module named 'agent'`.
+   >
+   > Se aparecer erro de conexão ao clicar em **Connect** mencionando `uv` (não achou o binário), é porque o Inspector spawna processos filhos sem o `PATH` completo do seu shell — resolvido com `ln -sf ~/.local/bin/uv /opt/homebrew/bin/uv` (ou onde seu `uv` estiver, num diretório que já esteja no `PATH` padrão do sistema).
+2. O terminal imprime uma URL tipo `http://127.0.0.1:6274/?MCP_INSPECTOR_API_TOKEN=...` — abre ela no browser (ou deixa abrir sozinho).
+3. Clica em **Connect** no canto superior esquerdo; deve aparecer "Connected".
+4. Aba **Tools** → **List Tools**: devem aparecer `list_products` e `list_orders`.
+5. `list_products` → **Run Tool** (sem parâmetros) — retorna os produtos do `database.db` real (não o de teste).
+6. `list_orders` → preenche `user_email` com um usuário existente no `database.db` → **Run Tool** — retorna os pedidos dele, ou `No user found ...` se o email não existir.
+7. `Ctrl+C` no terminal encerra o Inspector.
 
 ## Rodando o projeto
 
@@ -134,7 +165,7 @@ Docs interativos: `http://localhost:8000/docs`
 
 ```bash
 make run     # sobe o servidor em modo dev
-make mcp     # sobe o servidor MCP (stdio)
+make mcp     # sobe o servidor MCP com o Inspector web
 make ruff    # lint + format com ruff
 ```
 

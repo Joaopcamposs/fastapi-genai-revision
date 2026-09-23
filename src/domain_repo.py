@@ -42,22 +42,15 @@ class UserRepository(AbstractDomainRepo):
         finally:
             await self._release()
 
-    async def list(self, offset: int = 0, limit: int = 100) -> list[User]:
-        try:
-            result = await self.session.execute(
-                select(User).offset(offset).limit(limit)
-            )
-            return list(result.scalars().all())
-        finally:
-            await self._release()
-
 
 class ProductRepository(AbstractDomainRepo):
     """Persists the Product aggregate, translating to/from the ORM model."""
 
     async def add(self, product: ProductAggregate) -> Product:
         try:
-            db_product = Product(name=product.name, price=product.price)
+            db_product = Product(
+                user_id=product.user_id, name=product.name, price=product.price
+            )
             self.session.add(db_product)
             await self.session.commit()
             await self.session.refresh(db_product)

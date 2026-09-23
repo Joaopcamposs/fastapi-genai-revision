@@ -11,7 +11,7 @@ def build_tools(user_id: UUID) -> list:
 
     @tool
     async def list_products() -> str:
-        """List available products, with name and price."""
+        """List available products (public), with name and price."""
         products = await ProductViewRepo().list()
         return format_products(products)
 
